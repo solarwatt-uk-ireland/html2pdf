@@ -1,0 +1,20 @@
+{
+  "name": "html2pdf",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker that renders authenticated HTML requests to PDF.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node --check src/index.js",
+    "check": "npm run build && npm test",
+    "deploy": "npx wrangler deploy",
+    "dev": "npx wrangler dev",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@cloudflare/puppeteer": "^1.1.0"
+  }
+}
