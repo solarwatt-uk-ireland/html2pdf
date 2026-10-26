@@ -189,7 +189,6 @@ function authorizeRequest(request, env) {
 
 function validateContentType(request) {
   const contentType = request.headers.get("content-type");
-
   if (!contentType) {
     return;
   }
