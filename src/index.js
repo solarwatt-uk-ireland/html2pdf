@@ -27,8 +27,8 @@ const FONT_SPECS = [
   },
 ];
 
-const HTML_SIZE_LIMIT_BYTES = 1_500_000;
-const RENDER_TIMEOUT_MS = 25_000;
+const HTML_SIZE_LIMIT_BYTES = 3_000_000;
+const RENDER_TIMEOUT_MS = 40_000;
 const BROWSER_KEEP_ALIVE_MS = 60_000;
 const PDF_FILENAME = "document.pdf";
 let embeddedFontStylePromise;
@@ -194,7 +194,9 @@ function validateContentType(request) {
     return;
   }
 
-  if (!contentType.toLowerCase().includes("text/html")) {
+  const mediaType = contentType.split(";", 1)[0].trim().toLowerCase();
+
+  if (mediaType !== "text/html") {
     throw new HttpError(
       415,
       "unsupported_media_type",
@@ -219,9 +221,7 @@ async function readHtmlBody(request) {
     }
   }
 
-  const html = await request.text();
-
-  if (!html.trim()) {
+  if (!request.body) {
     throw new HttpError(
       400,
       "empty_body",
@@ -229,14 +229,50 @@ async function readHtmlBody(request) {
     );
   }
 
-  const actualBytes = new TextEncoder().encode(html).byteLength;
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  const htmlChunks = [];
+  let actualBytes = 0;
 
-  if (actualBytes > HTML_SIZE_LIMIT_BYTES) {
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      actualBytes += value.byteLength;
+
+      if (actualBytes > HTML_SIZE_LIMIT_BYTES) {
+        void reader.cancel().catch((error) => {
+          log("warn", "request_body_cancel_failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+        throw new HttpError(
+          413,
+          "payload_too_large",
+          `HTML payloads must be ${HTML_SIZE_LIMIT_BYTES} bytes or smaller.`,
+          { actualBytes },
+        );
+      }
+
+      htmlChunks.push(decoder.decode(value, { stream: true }));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  htmlChunks.push(decoder.decode());
+  const html = htmlChunks.join("");
+
+  if (!html.trim()) {
     throw new HttpError(
-      413,
-      "payload_too_large",
-      `HTML payloads must be ${HTML_SIZE_LIMIT_BYTES} bytes or smaller.`,
-      { actualBytes },
+      400,
+      "empty_body",
+      "The request body must contain HTML.",
     );
   }
 
@@ -415,13 +451,12 @@ function isPrivateIpv4(hostname) {
 async function buildEmbeddedFontStyle(env, origin) {
   if (!embeddedFontStylePromise) {
     embeddedFontStylePromise = (async () => {
-      const fontFaces = [];
+      const fontFaces = await Promise.all(
+        FONT_SPECS.map(async (font) => {
+          const fontBytes = await loadFontAsset(env, origin, font.assetPath);
+          const fontDataUrl = `data:${font.mimeType};base64,${arrayBufferToBase64(fontBytes)}`;
 
-      for (const font of FONT_SPECS) {
-        const fontBytes = await loadFontAsset(env, origin, font.assetPath);
-        const fontDataUrl = `data:${font.mimeType};base64,${arrayBufferToBase64(fontBytes)}`;
-
-        fontFaces.push(`
+          return `
 @font-face {
   font-family: "${font.family}";
   font-style: normal;
@@ -435,8 +470,9 @@ async function buildEmbeddedFontStyle(env, origin) {
   font-weight: normal;
   src: url("${fontDataUrl}") format("${font.format}");
   font-display: block;
-}`);
-      }
+}`;
+        }),
+      );
 
       return `<style id="embedded-averta-fonts">${fontFaces.join("\n")}</style>`;
     })().catch((error) => {

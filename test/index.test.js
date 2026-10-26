@@ -67,6 +67,25 @@ test("POST /render rejects non-HTML content types", async () => {
   assert.equal(payload.error.code, "unsupported_media_type");
 });
 
+test("POST /render only accepts the text/html media type", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.com/render", {
+      body: "<html><body>Hello</body></html>",
+      headers: {
+        authorization: "Bearer top-secret-token",
+        "content-type": "application/text/html",
+      },
+      method: "POST",
+    }),
+    createEnv(),
+  );
+
+  assert.equal(response.status, 415);
+
+  const payload = await response.json();
+  assert.equal(payload.error.code, "unsupported_media_type");
+});
+
 test("POST /render rejects empty HTML bodies", async () => {
   const response = await worker.fetch(
     new Request("https://example.com/render", {
@@ -84,6 +103,26 @@ test("POST /render rejects empty HTML bodies", async () => {
 
   const payload = await response.json();
   assert.equal(payload.error.code, "empty_body");
+});
+
+test("POST /render enforces the size limit using streamed UTF-8 bytes", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.com/render", {
+      body: "é".repeat(1_500_001),
+      headers: {
+        authorization: "Bearer top-secret-token",
+        "content-type": "text/html",
+      },
+      method: "POST",
+    }),
+    createEnv(),
+  );
+
+  assert.equal(response.status, 413);
+
+  const payload = await response.json();
+  assert.equal(payload.error.code, "payload_too_large");
+  assert.equal(payload.error.details.actualBytes, 3_000_002);
 });
 
 test("non-POST requests to /render are rejected", async () => {

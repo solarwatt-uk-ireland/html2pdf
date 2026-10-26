@@ -5,6 +5,7 @@ This project exposes an authenticated Cloudflare Worker endpoint that converts r
 ## What it does
 
 - Accepts `POST /render` with an HTML document in the request body.
+- Limits HTML request bodies to 3 MB, enforcing the limit as the body is read.
 - Requires `Authorization: Bearer <token>`.
 - Normalizes literal `\n` sequences into actual line breaks before rendering.
 - Embeds the uploaded Averta OTF files directly into the rendered document so the generated PDF carries the fonts with it.
